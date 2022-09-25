@@ -66,8 +66,6 @@
 # 4f-costs-totals.r - Code to sum the total labour, equipment, transport and admin costs for each restoration method and overall across the landscape
 # 5-cost-effectiveness.r - Code to calculate cost-effectiveness of each landscape pixel based on AGB gains per unit investment, and to identify the top 25% cost-effective pixels for prioritisation
 
-################################################################################                                   <- START
-
 ### INSTALL NECESSARY PACKAGES
 
 necessary.packages<-c("raster", "sp", "rgdal")
@@ -174,102 +172,73 @@ if (file.exists(outCRT)){
 # SET WORKING DIRECTORY:
 setwd(inDir)
 
-################################################################################
-############################# LANDSCAPE BIOMASS ################################                                   <- LANDSCAPE BIOMASS
-################################################################################
+########################### PREPARE INPUT RASTERS ##############################                                      <- PREPARE INPUT RASTERS
 
-################################################################################
-############### CALCULATING AGB DEFICIT FROM MAX AND CURRENT AGB ###############                                   <- CALCULATING AGB DEFICIT FROM MAX AND CURRENT AGB
+# Ensure all inputs have same CRS, extent, res, etc.
 
-# This section of code computes the difference and percentage difference between
-# the current and maximum potential biomass of each landscape pixel. Biomass deficit
-# and percentage deficit are also calculated, along with the percentage of maximum
-# potential biomass remaining prior to intervention.
+### CRS correct projectRaster code
+#maxbio <- projectRaster(maxbio, currbio)
+#writeRaster(maxbio, "agbmax_climate_notaggregated.tif", overwrite = T)
 
-# SET WORKING DIRECTORY:
-setwd(inDir)
+### Easiest way is to resample since there are varying CRSs and extents
+temp <- raster("Extent_1.tif") # Template raster used to resample other input rasters
+temp
+#class      : RasterLayer
+#dimensions : 3101, 3445, 10682945  (nrow, ncol, ncell)
+#resolution : 100, 100  (x, y)
+#extent     : 685971.2, 1030471, 8901502, 9211602  (xmin, xmax, ymin, ymax)
+#crs        : +proj=utm +zone=36 +south +datum=WGS84 +units=m +no_defs
+#source     : E:/R/workspaces/UdzKilo_Restoration_Planning/inputs/Extent_1.grd
+#names      : Extent_1
+#values     : 1, 1  (min, max)
+sa <- readOGR("Study_Area.shp") # Mask raster for setting pixel values outside Study Region to NA
 
-### ENSURE ALL INPUT RASTERS HAVE MATCHING extent, res, crs, origin, etc. ######
+### BIOMASS RASTERS
+currbio <- raster("agbcurr_1ha_rf_full.tif")
+maxbio <- raster("agbmax_climate_notaggregated.tif")
+currbio <- resample(currbio, temp, method="bilinear")
+maxbio <- resample(maxbio, temp, method="bilinear")
+writeRaster(currbio, "agbcurr.tif", overwrite = T)
+writeRaster(maxbio, "agbmax.tif", overwrite = T)
 
-### MEAN BIOMASS DEFICIT MAPS (REALISTIC SCENARIO) #############################
+currbio <- raster("agbcurr_lower_1ha_rf_full.tif")
+maxbio <- raster("agbmax_lower_climate_notaggregated.tif")
+currbio <- resample(currbio, temp, method="bilinear")
+maxbio <- resample(maxbio, temp, method="bilinear")
+writeRaster(currbio, "agbcurr_lower.tif", overwrite = T)
+writeRaster(maxbio, "agbmax_lower.tif", overwrite = T)
 
-### READ IN INPUT RASTERS: SA, CURRBIO & MAXBIO
-sa <- readOGR("Study_Area.shp")
-currbio <- raster("agbcurr.tif")
-maxbio <- raster("agbmax.tif")
+currbio <- raster("agbcurr_upper_1ha_rf_full.tif")
+maxbio <- raster("agbmax_upper_climate_notaggregated.tif")
+currbio <- resample(currbio, temp, method="bilinear")
+maxbio <- resample(maxbio, temp, method="bilinear")
+writeRaster(currbio, "agbcurr_upper.tif", overwrite = T)
+writeRaster(maxbio, "agbmax_upper.tif", overwrite = T)
 
-### COMPUTE OUTPUT RASTERS: AGBDIFF, PCTDIFF, AGBDEF, PCTDEF, PCTREM
-agbdiff <- maxbio - currbio
-agbdef <- calc(agbdiff, fun = function(x){x[x < 0] = 0; return(x)})
-pctdiff <- overlay(agbdiff, maxbio, fun=function(r1, r2){return(r1/r2)})
-pctdef <- overlay(agbdef, maxbio, fun=function(r1, r2){return(r1/r2)})
-pctrem <- calc(pctdef, fun=function(x){1-x})
+### LANDCOVER
+r <- raster("LandCoverFinal.tif")
+r <- resample(r, temp, method='ngb') # using nearest neighbour 'ngb' method (necessary as categorical dataset; 'bilinear' for continuous)
+writeRaster(r, "LandCoverFinal_1ha.tif", overwrite=T)
+# Extract and save rasters for individial landcover classes:
+lc <- ("LandCoverFinal_1ha.tif")
+lcfor <- raster(lc)
+lcfor[lc==1] <- 1
+lcsav <- raster(lc)
+lcsav[lc==2] <- 2
+lcfp <- raster(lc)
+lcfp[lc==3] <- 3
+lcag <- raster(lc)
+lcag[lc==4] <- 4
+lcoth <- raster(lc)
+lcoth[lc==5] <- 5
+writeRaster(lcfor, filename = "LandCover_Forest.tif", overwrite=T)
+writeRaster(lcsav, filename = "LandCover_Savanna.tif", overwrite=T)
+writeRaster(lcfp, filename = "LandCover_Floodplain.tif", overwrite=T)
+writeRaster(lcag, filename = "LandCover_AgMosaic.tif", overwrite=T)
+writeRaster(lcoth, filename = "LandCover_Other.tif", overwrite=T)
 
-writeRaster(agbdiff, "agbdiff.tif", overwrite = T)
-writeRaster(agbdef, "agbdef.tif", overwrite = T)
-writeRaster(pctdiff, "agbdiff_pct.tif", overwrite = T)
-writeRaster(pctdef, "agbdef_pct.tif", overwrite = T)
-writeRaster(pctrem, "agbrem_pct.tif", overwrite = T)
-
-# BIOMASS STACK:
-agbs <- stack(currbio, maxbio, agbdiff, pctdiff, agbdef, pctdef, pctrem)
-names(agbs) <- c("currbio", "maxbio", "agbdiff", "pctdiff", "agbdef", "pctdef", "pctrem")
-agbs
-writeRaster(agbs, "biomass_stack.grd", overwrite=T)
-
-### UPPER BIOMASS DEFICIT MAPS (PESSIMISTIC SCENARIO) ##########################
-### Largest deficit = lower current - upper max
-
-### READ IN INPUT RASTERS: SA, CURRBIO & MAXBIO
-sa <- readOGR("Study_Area.shp")
-currbio <- raster("agbcurr_lower.tif")
-maxbio <- raster("agbmax_upper.tif")
-
-### COMPUTE OUTPUT RASTERS: AGBDIFF, PCTDIFF, AGBDEF, PCTDEF, PCTREM
-
-agbdiff <- maxbio - currbio
-agbdef <- calc(agbdiff, fun = function(x){x[x < 0] = 0; return(x)})
-pctdiff <- overlay(agbdiff, maxbio, fun=function(r1, r2){return(r1/r2)})
-pctdef <- overlay(agbdef, maxbio, fun=function(r1, r2){return(r1/r2)})
-pctrem <- calc(pctdef, fun=function(x){1-x})
-
-writeRaster(agbdiff, "agbdiff_pess.tif", overwrite = T)
-writeRaster(agbdef, "agbdef_pess.tif", overwrite = T)
-writeRaster(pctdiff, "agbdiff_pct_pess.tif", overwrite = T)
-writeRaster(pctdef, "agbdef_pct_pess.tif", overwrite = T)
-writeRaster(pctrem, "agbrem_pct_pess.tif", overwrite = T)
-
-# BIOMASS STACK:
-agbs <- stack(currbio, maxbio, agbdiff, pctdiff, agbdef, pctdef, pctrem)
-names(agbs) <- c("currbio", "maxbio", "agbdiff", "pctdiff", "agbdef", "pctdef", "pctrem")
-agbs
-writeRaster(agbs, "biomass_stack_pess.grd", overwrite=T)
-
-### LOWER BIOMASS DEFICIT MAPS (OPTIMISTIC SCENARIO) ###########################
-### Lowest deficit = upper current - lower max
-
-### READ IN INPUT RASTERS: SA, CURRBIO & MAXBIO
-sa <- readOGR("Study_Area.shp")
-currbio <- raster("agbcurr_upper.tif")
-maxbio <- raster("agbmax_lower.tif")
-
-### COMPUTE OUTPUT RASTERS: AGBDIFF, PCTDIFF, AGBDEF, PCTDEF, PCTREM
-
-agbdiff <- maxbio - currbio
-agbdef <- calc(agbdiff, fun = function(x){x[x < 0] = 0; return(x)})
-pctdiff <- overlay(agbdiff, maxbio, fun=function(r1, r2){return(r1/r2)})
-pctdef <- overlay(agbdef, maxbio, fun=function(r1, r2){return(r1/r2)})
-pctrem <- calc(pctdef, fun=function(x){1-x})
-
-writeRaster(agbdiff, "agbdiff_opt.tif", overwrite = T)
-writeRaster(agbdef, "agbdef_opt.tif", overwrite = T)
-writeRaster(pctdiff, "agbdiff_pct_opt.tif", overwrite = T)
-writeRaster(pctdef, "agbdef_pct_opt.tif", overwrite = T)
-writeRaster(pctrem, "agbrem_pct_opt.tif", overwrite = T)
-
-# BIOMASS STACK:
-agbs <- stack(currbio, maxbio, agbdiff, pctdiff, agbdef, pctdef, pctrem)
-names(agbs) <- c("currbio", "maxbio", "agbdiff", "pctdiff", "agbdef", "pctdef", "pctrem")
-agbs
-writeRaster(agbs, "biomass_stack_opt.grd", overwrite=T)
+# ELEVATION
+r <- raster("dem_srtm_43_4414.tif")
+r <- resample(r, temp, method='bilinear')
+writeRaster(r, "dem_srtm_1ha.tif", overwrite=T)
 
